@@ -8,10 +8,12 @@
 
 ```bash
 conda create -n powerline python=3.11 -y && conda activate powerline
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # CUDA 버전에 맞게
 pip install -e ".[dev,qwen]"
 pip install git+https://github.com/luca-medeiros/lang-segment-anything.git
-python -c "import torch; print(torch.cuda.is_available())"                           # True 확인
+# lang-sam이 torch를 2.4로 내려 놓지만, 최신 transformers(GroundingDINO, Qwen)는 torch>=2.6 필요
+# → 반드시 마지막에 torch를 올린다 (CUDA 11.x면 cu124 대신 cu118)
+pip install --upgrade "torch>=2.6" "torchvision>=0.21" --index-url https://download.pytorch.org/whl/cu124
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"         # 2.6+ / True 확인
 ```
 
 기본 VLM/LLM은 로컬 **Qwen2.5-VL-7B** (무료, VRAM 16GB+). Claude API를 쓰려면
