@@ -7,9 +7,6 @@ def build_detector(name: str, cfg: dict) -> Detector:
     if name == "langsam":
         from .langsam import LangSAMDetector
         return LangSAMDetector(dcfg)
-    if name == "yolo":
-        from .yolo_seg import YoloSegDetector
-        return YoloSegDetector(dcfg)
     raise ValueError(f"unknown detector: {name}")
 
 

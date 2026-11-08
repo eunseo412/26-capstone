@@ -57,7 +57,7 @@ class Candidate:
     """검출기가 낸 전선 후보 1개."""
     image_id: str
     cand_id: int
-    source: str                       # "langsam" | "yolo" | ...
+    source: str                       # 후보를 만든 사전학습 모델 이름 (예: "langsam")
     bbox: tuple[int, int, int, int]   # x0, y0, x1, y1 (원본 좌표, x1/y1 미포함)
     mask: np.ndarray                  # bbox 크기의 bool 마스크
     score: float

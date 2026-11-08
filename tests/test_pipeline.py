@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from powerline import load_config
-from powerline.data import load_dataset, parse_cvat_xml, split_by_video
+from powerline.data import load_dataset, parse_cvat_xml
 from powerline.detectors.base import Detector, iter_tiles
 from powerline.eval.analysis import evaluate_run
 from powerline.eval.metrics import Evaluator
@@ -54,7 +54,7 @@ class FakeDetector(Detector):
 
     def _predict_raw(self, image):
         out = []
-        for (a, b), s in zip(WIRES + [LANE], [0.8, 0.45, 0.65]):
+        for (a, b), s in zip(WIRES + [LANE], [0.8, 0.25, 0.65]):
             m = np.zeros(image.shape[:2], np.uint8)
             cv2.line(m, a, b, 1, 9 if (a, b) == tuple(LANE) else 4)
             out.append((m.astype(bool), s, "power line"))
@@ -84,14 +84,6 @@ def test_parse_real_xml():
     anns = parse_cvat_xml(xml, ["powerline", "polyline"])
     assert len(anns) == 66 and anns[0].width == 3840
     assert sum(len(a.polylines) for a in anns) == 1633
-
-
-def test_split_has_no_video_leak(env):
-    root, cfg = env
-    recs = load_dataset(cfg, root)
-    sp = split_by_video(recs + recs, 0.3, 0.3)
-    vids = [{r.video_id for r in v} for v in sp.values()]
-    assert not (vids[0] & vids[1]) and not (vids[0] & vids[2]) and not (vids[1] & vids[2])
 
 
 def test_tiles_cover_image():

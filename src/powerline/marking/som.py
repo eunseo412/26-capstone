@@ -13,6 +13,9 @@ import numpy as np
 
 from ..types import Candidate
 
+GAP_PX = 6        # overview에서 윤곽과 전선 사이 간격
+CROP_GAP_PX = 8   # crop에서 표시 띠와 전선 사이 간격
+
 
 def palette(n: int) -> list[tuple[int, int, int]]:
     cols = []
@@ -63,9 +66,14 @@ def draw_overview(image: np.ndarray, cands: list[Candidate], max_side: int = 156
         sx0, sy0 = int(x0 * s), int(y0 * s)
         sw, sh = max(1, int(round(x1 * s)) - sx0), max(1, int(round(y1 * s)) - sy0)
         m = cv2.resize(c.mask.astype(np.uint8), (sw, sh), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_NEAREST)
-        m = cv2.dilate((m > 0).astype(np.uint8), np.ones((3, 3), np.uint8))
-        contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE, offset=(sx0, sy0))
-        cv2.drawContours(out, contours, -1, col, lw if hl else 1)
+        # 전선은 몇 px라 윤곽을 바로 위에 그리면 VLM이 전선 자체를 못 본다 → 간격을 두고 바깥에 그림
+        gap = 2 * GAP_PX + 1 if hl else 3
+        pad = gap
+        m = cv2.copyMakeBorder((m > 0).astype(np.uint8), pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
+        m = cv2.dilate(m, np.ones((gap, gap), np.uint8))
+        contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+                                       offset=(sx0 - pad, sy0 - pad))
+        cv2.drawContours(out, contours, -1, col, 2 if hl else 1)
         if hl:
             x, y = _label_point(c)
             _draw_tag(out, f"#{c.cand_id}", (int(x * s) + 4, int(y * s) - 4), col, small.shape[1] / 1568)
@@ -85,10 +93,12 @@ def draw_crop(image: np.ndarray, cand: Candidate, context: float = 1.6,
     m = cand.full_mask(h, w)[Y0:Y1, X0:X1].astype(np.uint8)
     crop, s = _resize_max(crop, max_side)
     m = cv2.resize(m, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
-    edge = cv2.dilate(m, np.ones((7, 7), np.uint8)) - m
-    overlay = crop.copy()
-    overlay[edge.astype(bool)] = (255, 0, 255)
-    out = cv2.addWeighted(overlay, 0.6, crop, 0.4, 0)
+    # 전선 양옆으로 간격을 둔 띠만 칠한다 (전선 픽셀은 원본 그대로 보이게)
+    inner = cv2.dilate(m, np.ones((2 * CROP_GAP_PX + 1,) * 2, np.uint8))
+    outer = cv2.dilate(m, np.ones((2 * (CROP_GAP_PX + 3) + 1,) * 2, np.uint8))
+    band = (outer - inner).astype(bool)
+    out = crop.copy()
+    out[band] = (0.35 * out[band] + 0.65 * np.array([255, 0, 255])).astype(np.uint8)
     _draw_tag(out, f"#{cand.cand_id}", (6, 30), (255, 0, 255), 1.0)
     return out
 

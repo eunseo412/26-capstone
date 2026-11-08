@@ -1,12 +1,11 @@
-"""Stage 1~5 실행.
+"""Stage 1~5 실행 (학습 없음, 사전학습 모델 조합만 사용).
 
 예)
-  # 제안 파이프라인: LangSAM + Claude VLM
-  python scripts/run_pipeline.py --detector langsam --vlm claude --run langsam_claude
-  # Baseline 후보만 저장 (VLM 없이)
-  python scripts/run_pipeline.py --detector yolo --no-vlm --run baseline_yolo
-  # 후보 캐시 재사용, VLM만 바꿔 재실행
-  python scripts/run_pipeline.py --reuse langsam_claude --vlm qwen --run langsam_qwen
+  # LangSAM 후보만 추출 (VLM 없이) → 'LangSAM 단독' 기준 방식 결과도 이것으로 평가됨
+  python scripts/run_pipeline.py --no-vlm --run langsam_only
+  # 추출해 둔 후보를 재사용해 VLM 판정
+  python scripts/run_pipeline.py --reuse langsam_only --vlm claude --run langsam_claude
+  python scripts/run_pipeline.py --reuse langsam_only --vlm qwen --run langsam_qwen
 """
 import shutil
 
@@ -18,7 +17,7 @@ from powerline.vlm import build_vlm
 
 def main():
     p = base_parser(__doc__)
-    p.add_argument("--detector", default="langsam", choices=["langsam", "yolo"])
+    p.add_argument("--detector", default="langsam", choices=["langsam"])
     p.add_argument("--vlm", default=None, help="claude | qwen | mock (기본: 설정 파일)")
     p.add_argument("--no-vlm", action="store_true")
     p.add_argument("--run", required=True, help="outputs/<run> 이름")

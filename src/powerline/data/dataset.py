@@ -1,8 +1,7 @@
-"""데이터셋 로딩, 정답 마스크 생성, 영상 단위 split."""
+"""데이터셋 로딩, 정답 마스크 생성. (학습이 없으므로 split 없이 전체를 평가에 사용)"""
 from __future__ import annotations
 
 import logging
-import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,24 +94,3 @@ def load_dataset(cfg: dict, root_dir: str | Path = ".") -> list[ImageRecord]:
     if missing:
         log.warning("정답은 있으나 이미지 파일이 없는 항목: %d / %d", missing, len(records))
     return records
-
-
-def split_by_video(records: list[ImageRecord], val_ratio: float, test_ratio: float,
-                   seed: int = 42) -> dict[str, list[ImageRecord]]:
-    """영상 ID 단위로 train/val/test 분할.
-
-    frame_1~4가 같은 영상의 다른 시점일 수 있으므로, 이미지 단위로 섞으면
-    거의 같은 장면이 train과 test에 동시에 들어가 성능이 부풀려진다.
-    """
-    videos = sorted({r.video_id for r in records})
-    rng = random.Random(seed)
-    rng.shuffle(videos)
-    n_test = round(len(videos) * test_ratio)
-    n_val = round(len(videos) * val_ratio)
-    test_v = set(videos[:n_test])
-    val_v = set(videos[n_test:n_test + n_val])
-    out = {"train": [], "val": [], "test": []}
-    for r in records:
-        key = "test" if r.video_id in test_v else "val" if r.video_id in val_v else "train"
-        out[key].append(r)
-    return out

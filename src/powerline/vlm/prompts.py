@@ -25,8 +25,10 @@ Reason about semantic and spatial context, not only appearance:
 - Road edges, curbs, guardrails, fences, cracks, roof/building edges, tree branches and pole members
   are other common confusors.
 
-Image 1 is the full scene with the candidate's outline and a "#id" tag (other candidates in grey).
-Image 2 is a zoomed crop around the same candidate, outlined in magenta.
+Image 1 is the full scene with an outline drawn AROUND the candidate (with a small gap so the object itself
+stays visible) and a "#id" tag; other candidates are outlined thinly in grey.
+Image 2 is a zoomed crop of the same candidate: the object runs between two magenta bands, unpainted.
+Judge the object itself, not the drawn marks.
 
 Write every item of "evidence" in Korean, as short concrete observations (e.g. "지면 위 흰색 도색",
 "전주 상단에서 시작", "인접 전선과 평행한 어두운 선"). Give 2-4 items.

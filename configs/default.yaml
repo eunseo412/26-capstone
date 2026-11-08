@@ -8,11 +8,6 @@ data:
   annotation_glob: "*.xml"     # dataset/<frame>/*.xml (CVAT for images 1.1)
   # XML에 'powerline'과 'polyline' 두 라벨이 섞여 있음 → 둘 다 전선으로 취급
   positive_labels: [powerline, polyline]
-  # 같은 영상의 다른 프레임이 train/test에 섞이지 않도록 영상 ID 단위로 split
-  split:
-    seed: 42
-    val_ratio: 0.15
-    test_ratio: 0.2
 
 gt:
   line_thickness: 6            # 정답 polyline을 마스크로 그릴 때 두께(px, 원본 4K 기준)
@@ -21,29 +16,22 @@ eval:
   tolerance_px: 10             # 예측 선이 정답 선에서 이 거리 이내면 맞은 것으로 봄
   instance_match_ratio: 0.5    # 후보 골격의 이 비율 이상이 정답 근처면 TP 후보
 
+# 학습 없음: 사전학습 모델(LangSAM = GroundingDINO + SAM)을 그대로 사용
 detectors:
   langsam:
     text_prompts: ["power line", "electric wire", "cable"]
-    box_threshold: 0.2          # recall 우선: 낮게
+    box_threshold: 0.2          # 후보 추출은 recall 우선: GroundingDINO 기본값(0.3)보다 낮게
     text_threshold: 0.2
     tile:
       enabled: true
       size: 1280
       overlap: 0.2
     min_area_px: 200
-  yolo:
-    weights: runs/baseline/weights/best.pt
-    conf: 0.25
-    imgsz: 1280
-    tile:
-      enabled: true
-      size: 1280
-      overlap: 0.2
 
 router:
-  # 이 구간의 검출 점수는 '불확실'로 보고 VLM에 보냄
+  # 이 구간의 검출 점수는 '불확실'로 보고 VLM에 보냄 (keep_score 근처)
   score_low: 0.2
-  score_high: 0.6
+  score_high: 0.45
   # 아래 규칙 중 하나라도 걸리면 점수와 무관하게 VLM에 보냄
   suspect_rules:
     lane_marking: true          # 밝고 채도 낮은(흰/노랑) 직선
@@ -73,7 +61,9 @@ vlm:
 fusion:
   reject_confidence: 0.6        # VLM이 이 확신도 이상으로 '전선 아님'이면 제거
   accept_confidence: 0.6        # VLM이 이 확신도 이상으로 '전선'이면 유지(점수 낮아도)
-  keep_score: 0.6               # VLM을 거치지 않은 후보는 이 점수 이상이면 유지
+  # 검출 점수 기준선. 'LangSAM 단독(기준 방식)'은 이 점수 이상 후보를 전부 전선으로 봄.
+  # GroundingDINO 기본 box_threshold(0.3)와 같게 둠. VLM을 거치지 않은 후보도 이 기준으로 결정
+  keep_score: 0.3
 
 report:
   llm_backend: claude           # claude | none (none이면 템플릿 문장으로 작성)

@@ -145,7 +145,7 @@ def render_report(path: str | Path, rcfg: dict, metrics: dict, content: dict, ca
 
     # ---- 3. 성능 비교
     _heading(doc, "3. 성능 비교")
-    order = [k for k in ("baseline", "detector_only", "detector_vlm") if k in metrics["summaries"]]
+    order = [k for k in ("detector_all", "detector_only", "detector_vlm") if k in metrics["summaries"]]
     t = doc.add_table(rows=1 + len(order), cols=5)
     t.style = "Table Grid"
     t.alignment = WD_TABLE_ALIGNMENT.CENTER

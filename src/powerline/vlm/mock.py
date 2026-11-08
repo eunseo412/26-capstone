@@ -29,6 +29,6 @@ class MockBackend(VLMBackend):
         elif "shadow" in reasons:
             d = (False, "shadow", 0.6, ["[mock] 주변보다 어두운 선"])
         else:
-            d = (cand.score >= 0.4, "other" if cand.score < 0.4 else "none", 0.5, ["[mock] 점수 기준"])
+            d = (cand.score >= 0.3, "other" if cand.score < 0.3 else "none", 0.5, ["[mock] 점수 기준"])
         return json.dumps({"cand_id": cand.cand_id, "is_power_line": d[0], "confusor_type": d[1],
                            "confidence": d[2], "evidence": d[3]}, ensure_ascii=False)

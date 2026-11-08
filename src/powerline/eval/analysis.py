@@ -9,14 +9,13 @@ from ..pipeline import load_candidates, load_decisions, safe_name
 from .metrics import Evaluator, distance_to, summarize
 
 
-def evaluate_run(run_dir: str | Path, records: list[ImageRecord], cfg: dict,
-                 baseline_run: str | Path | None = None) -> dict:
-    """run_dir: LangSAM(+VLM) 결과, baseline_run: Baseline OD 결과(선택).
+def evaluate_run(run_dir: str | Path, records: list[ImageRecord], cfg: dict) -> dict:
+    """run_dir: LangSAM(+VLM) 결과. 학습이 없으므로 같은 후보 집합에서 세 방식을 비교한다.
 
     비교군:
-      baseline        : Baseline OD 모델 후보 전부 (baseline_run이 있으면)
-      detector_only   : 이 run의 검출기 후보를 점수 기준(keep_score)만으로 선택
-      detector_vlm    : 이 run의 최종 판정 (제안 파이프라인)
+      detector_all    : LangSAM이 낸 후보 전부 (recall 상한 참고용)
+      detector_only   : LangSAM 단독 = 점수 keep_score 이상만 전선으로 봄 (일반적인 OD 사용법, 기준 방식)
+      detector_vlm    : LangSAM + VLM 최종 판정 (제안 파이프라인)
     """
     ev = Evaluator(cfg["eval"]["tolerance_px"], cfg["eval"]["instance_match_ratio"])
     keep_score = cfg["fusion"]["keep_score"]
@@ -35,11 +34,7 @@ def evaluate_run(run_dir: str | Path, records: list[ImageRecord], cfg: dict,
         cands, decs = load_candidates(cpath), load_decisions(dpath)
         dmap = {d.cand_id: d for d in decs}
 
-        if baseline_run:
-            bpath = Path(baseline_run) / "candidates" / f"{name}.json"
-            if bpath.exists():
-                groups["baseline"].append(ev.evaluate_image(rec, load_candidates(bpath)))
-
+        groups["detector_all"].append(ev.evaluate_image(rec, cands))
         only = ev.evaluate_image(rec, cands, {c.cand_id for c in cands if c.score >= keep_score})
         full = ev.evaluate_image(rec, cands, {d.cand_id for d in decs if d.keep})
         groups["detector_only"].append(only)

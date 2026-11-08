@@ -1,24 +1,27 @@
 # 26-capstone
 
-드론 영상 전선 검출: Object Detection + LangSAM + VLM 검증 파이프라인
+드론 영상 전선 검출: **사전학습 모델 조합** (LangSAM + VLM) 파이프라인. 모델 학습은 하지 않음.
 
 - 설계 문서: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## 설치
+## 설치 (GPU 서버)
 
 ```bash
-pip install -e ".[dev]"                 # 기본 (데이터, 평가, 마킹, 보고서)
-pip install -e ".[claude]"              # VLM: Claude API (ANTHROPIC_API_KEY 필요)
-pip install -e ".[qwen]"                # VLM: 로컬 Qwen2.5-VL (GPU 필요)
-pip install -e ".[yolo]"                # Baseline: YOLO-seg
-pip install git+https://github.com/luca-medeiros/lang-segment-anything.git   # LangSAM
+conda create -n powerline python=3.11 -y && conda activate powerline
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # CUDA 버전에 맞게
+pip install -e ".[dev,claude]"
+pip install git+https://github.com/luca-medeiros/lang-segment-anything.git
+python -c "import torch; print(torch.cuda.is_available())"                           # True 확인
+export ANTHROPIC_API_KEY="..."                                                      # Claude 사용 시
 ```
+
+로컬 Qwen2.5-VL을 VLM으로 쓰려면 `pip install -e ".[qwen]"`.
 
 ## 데이터 배치
 
 ```
-dataset/frame_N/images/*.jpg           # 드론 이미지
-dataset/frame_N/*.xml                  # CVAT for images 1.1 정답 (polyline)
+dataset/<폴더>/*.xml                    # CVAT for images 1.1 정답 (polyline)
+dataset/<폴더>/<아무 하위폴더>/*.jpg     # 드론 이미지 (파일명으로 자동 매칭)
 ```
 
 ## 실행 순서
@@ -27,23 +30,24 @@ dataset/frame_N/*.xml                  # CVAT for images 1.1 정답 (polyline)
 # 0. 데이터 현황 + 정답 시각화 (outputs/gt_vis/)
 python scripts/inspect_data.py
 
-# 1. Baseline 학습 → Baseline 후보 저장
-python scripts/train_baseline.py
-python scripts/run_pipeline.py --detector yolo --no-vlm --run baseline_yolo
+# 1. LangSAM 후보 추출 (VLM 없이) — 가장 오래 걸리는 단계, 한 번만
+python scripts/run_pipeline.py --no-vlm --run langsam_only
 
-# 2. 제안 파이프라인 (LangSAM → 마킹 → 선별 → VLM → 융합)
-python scripts/run_pipeline.py --detector langsam --vlm claude --run langsam_claude
+# 2. 추출해 둔 후보로 VLM 판정
+python scripts/run_pipeline.py --reuse langsam_only --vlm claude --run langsam_claude
 
-# 3. 평가 (Baseline / LangSAM 단독 / LangSAM+VLM 비교)
-python scripts/evaluate.py --run langsam_claude --baseline baseline_yolo
+# 3. 평가: LangSAM 전체 후보 / LangSAM 단독(기준) / LangSAM+VLM(제안)
+python scripts/evaluate.py --run langsam_claude
 
 # 4. 1페이지 Word 보고서 → outputs/langsam_claude/report.docx
 python scripts/make_report.py --run langsam_claude
 ```
 
-- `--limit 3`: 앞에서 3장만 돌려 빠르게 점검
-- `--vlm mock`: GPU/API 없이 흐름만 점검 (규칙 기반 가짜 VLM — 결과 수치는 의미 없음)
-- `--reuse <run>`: 다른 run의 LangSAM 후보를 재사용해 VLM 단계만 다시 실행
+옵션
+- `--limit 3`: 앞에서 3장만 (빠른 점검). 1~3단계에 같은 값을 줄 것
+- `--frames frame_1 frame_2`: 일부 폴더만
+- `--vlm qwen`: 로컬 Qwen2.5-VL / `--vlm mock`: 흐름 점검용 가짜 VLM (수치 무의미)
+- `make_report.py --llm none`: LLM 없이 템플릿 문장으로 보고서 작성
 
 ## 테스트
 

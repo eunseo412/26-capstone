@@ -19,7 +19,11 @@ CONFUSOR_KO = {
     "guardrail": "가드레일", "crack": "노면 균열", "building_edge": "건물 모서리",
     "branch": "나뭇가지", "pole": "전주 부재", "other": "기타",
 }
-GROUP_KO = {"baseline": "Baseline OD", "detector_only": "LangSAM 단독", "detector_vlm": "LangSAM + VLM(제안)"}
+GROUP_KO = {
+    "detector_all": "LangSAM 전체 후보",
+    "detector_only": "LangSAM 단독(기준)",
+    "detector_vlm": "LangSAM + VLM(제안)",
+}
 
 LIMITS = {"overview": 160, "pipeline": 260, "performance": 220, "case": 130, "conclusion": 220, "action": 60}
 
@@ -74,14 +78,14 @@ def _facts(metrics: dict, cases: list[dict]) -> dict:
 
 
 PROMPT = """아래는 드론 영상 전선 검출 파이프라인(LangSAM 후보 생성 → 번호 마킹 → 오답 가능성 높은 후보만 VLM 판정 → 결정 융합)의
-평가 결과입니다. 담당자가 확인할 1페이지 공식 보고서의 서술 부분을 작성하세요.
+평가 결과입니다. 모델 학습 없이 사전학습 모델만 조합했습니다. 담당자가 확인할 1페이지 공식 보고서의 서술 부분을 작성하세요.
 
 규칙:
 - 개조식 공문서 문체(~함, ~임)로 간결하게. 과장 금지, 주어진 수치만 사용하고 새 수치를 만들지 말 것.
 - 필드별 최대 글자 수: overview {overview}, pipeline {pipeline}, performance {performance},
   case_explanations 각 {case}, conclusion {conclusion}, action_items 각 {action} (최대 3개).
 - case_explanations는 cases 순서대로, VLM이 무엇을 근거로 어떻게 판단했고 그 판단이 정답과 맞았는지 서술.
-- performance는 제안 방식과 비교군의 Precision/Recall/F1 차이와 혼동 유형별 오검출 제거를 해석.
+- performance는 제안 방식과 기준 방식(LangSAM 단독)의 Precision/Recall/F1 차이와 혼동 유형별 오검출 제거를 해석.
 - 개선이 없거나 악화된 지표가 있으면 그대로 밝힐 것.
 
 평가 결과(JSON):
@@ -127,7 +131,7 @@ def template_content(metrics: dict, cases: list[dict]) -> dict:
     return {
         "overview": f"드론 영상 {metrics['n_images']}장을 대상으로 전선 검출 결과를 정답과 비교하고, "
                     f"VLM 기반 오검출 보정 효과를 확인함.",
-        "pipeline": "LangSAM으로 전선 후보를 넓게 추출하고 후보별 번호를 표시한 뒤, 점수가 애매하거나 차선·그림자로 "
+        "pipeline": "학습 없이 사전학습 모델만 조합함. LangSAM으로 전선 후보를 넓게 추출하고 후보별 번호를 표시한 뒤, 점수가 애매하거나 차선·그림자로 "
                     "의심되는 후보만 VLM에 전달하여 의미적 맥락(지면 위 도색, 그림자 쌍, 전주 연결 등)으로 재판정함.",
         "performance": f"F1 {a.get('f1', 0):.3f} → {b.get('f1', 0):.3f}, Precision {a.get('precision', 0):.3f} → "
                        f"{b.get('precision', 0):.3f}, Recall {a.get('recall', 0):.3f} → {b.get('recall', 0):.3f}. "

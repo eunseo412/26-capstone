@@ -3,7 +3,9 @@
 > 목적: 드론 영상에서 **전선(power line)** 검출 시, 단순 Object Detection 모델이 틀리는 부분
 > (도로 차선, 그림자, 도로 경계, 가드레일, 균열 등 **형태가 비슷한 혼동 객체**)을
 > VLM의 **의미적·맥락적 추론**으로 보정할 수 있는지 검증한다.
-> 최종 산출물은 검출 결과 + 정답 대비 평가 + **1페이지 공식 Word 보고서**이다.
+>
+> **모델 학습은 하지 않는다.** 사전학습된 모델(LangSAM, VLM, LLM)을 그대로 조합해서만 사용한다.
+> 정답 XML은 평가에만 쓴다.
 
 ---
 
@@ -11,7 +13,7 @@
 
 ```mermaid
 flowchart LR
-    A[드론 이미지] --> B[Stage 1<br/>LangSAM 후보 생성]
+    A[드론 이미지] --> B[Stage 1<br/>LangSAM 후보 생성<br/>사전학습 그대로]
     B --> C[Stage 2<br/>Marking<br/>번호·윤곽 표시 + Crop]
     C --> D{Stage 3<br/>불확실 후보 선별}
     D -- 확신 높음 --> F
@@ -19,131 +21,104 @@ flowchart LR
     E --> F[Stage 5<br/>결정 융합]
     F --> G[Stage 6<br/>평가 vs XML 정답]
     G --> H[Stage 7<br/>LLM 보고서 작성<br/>→ 1p .docx]
-    X[Baseline OD 모델<br/>YOLO 등] --> G
 ```
 
-각 Stage는 **독립 실행 + 결과 파일 캐시(JSONL)** 구조로 만든다.
-→ VLM 프롬프트만 바꿔서 Stage 4부터 재실행하는 식의 실험이 쉬워진다.
+| 역할 | 사용 모델 (학습 없음) |
+|---|---|
+| 후보 생성 (단순 OD 역할) | LangSAM = GroundingDINO(텍스트 → 박스) + SAM(박스 → 마스크) |
+| 의미적 재판정 | VLM: Claude API 또는 로컬 Qwen2.5-VL |
+| 보고서 문장 작성 | LLM: Claude API 또는 로컬 Qwen2.5-VL |
+
+각 Stage는 **결과 파일 캐시(JSON)** 구조 → LangSAM은 한 번만 돌리고 VLM/프롬프트만 바꿔 반복 실험 가능.
 
 ---
 
 ## 2. Stage별 설계
 
 ### Stage 0. 데이터 로딩 (`data/`)
-- `dataset/<폴더>/` 의 이미지와 같은 이름의 `.xml` 정답 파일을 매칭.
-- 정답 포맷: **CVAT for images 1.1, polyline** (frame_1: 이미지 66장, 3840×2160, polyline 1,633개).
-  라벨이 `powerline`(1,152)과 `polyline`(481) 두 가지로 섞여 있어 둘 다 전선으로 취급 (`data.positive_labels`).
-- 파일명이 `<영상ID>_frame_000000.jpg` 형식 → frame_1~4가 같은 영상의 다른 시점일 가능성이 높으므로
-  **영상 ID 단위로 train/val/test split** (같은 장면이 train/test에 섞여 성능이 부풀려지는 것 방지).
+- 정답 포맷: **CVAT for images 1.1, polyline**. 이미지 200장(3840×2160), 정답 선 4,852개.
+- `dataset/` 아래 XML이 있는 폴더를 자동 탐색, 이미지는 그 하위 폴더 어디에 있든 파일명으로 매칭.
+- 라벨 `powerline`/`polyline` 둘 다 전선으로 취급 (`data.positive_labels`).
+- 학습이 없으므로 split 없이 전체를 평가에 사용 (`--frames`, `--limit`로 일부만 실행 가능).
 
 ### Stage 1. 후보 생성 — LangSAM (`detectors/langsam.py`)
-- LangSAM = GroundingDINO(텍스트 → box) + SAM(box → mask).
-- 텍스트 프롬프트: `"power line"`, `"electric wire"`, `"cable"` 등 앙상블.
-- **Recall 우선**: box threshold를 낮게 잡아 전선 후보를 최대한 많이 뽑고, 정밀도는 뒤 단계(VLM)가 담당.
-- 고해상도 드론 이미지는 전선이 매우 얇으므로 **타일링(슬라이딩 윈도우) 후 병합** 옵션 제공.
-- 각 후보에 기하 특징을 함께 계산: 직선성, 길이, 방향, 이미지 끝까지 이어지는지, 굵기 균일성, 다른 후보와의 평행성.
+- 텍스트 프롬프트: `"power line"`, `"electric wire"`, `"cable"` 앙상블.
+- **Recall 우선**: box threshold 0.2 (GroundingDINO 기본 0.3보다 낮게) → 정밀도는 VLM이 담당.
+- 4K 이미지에서 전선은 몇 px이므로 **1280px 타일(20% 겹침)로 잘라 추론 후 병합**.
+- 후보별 특징 계산: 직선성, 길이, 굵기, 방향, 밝기 대비, 채도, 평행 이웃 수, 지배 방향과의 차이.
 
 ### Stage 2. Marking (`marking/`)
-- **Set-of-Mark 방식**: 원본 위에 후보별 색상 윤곽선 + 번호 태그를 그린 이미지 1장.
-- 후보별 **확대 crop (주변 맥락 포함)** 도 함께 생성 → VLM이 "전체 맥락"과 "국소 디테일"을 모두 보게 함.
+- **Set-of-Mark**: 전체 장면에 후보 윤곽 + `#번호` (맥락용) / 후보 확대 crop (디테일용).
+- 윤곽은 전선에서 **간격을 두고 바깥에** 그림 → VLM이 표시선이 아닌 전선 자체를 볼 수 있음.
 
 ### Stage 3. 불확실 후보 선별 (`fusion/router.py`)
-- 모든 후보를 VLM에 보내지 않고 **오답 가능성이 높은 후보만** 보낸다 (비용·속도).
-- 기준 예: 검출 점수 중간 구간, 지면 위 직선(차선 의심), 어두운 선형 영역(그림자 의심), 다른 전선과 방향 불일치 등.
-- 이 선별 기준 자체가 보고서의 "판단 대상 선정 근거"가 된다.
+- 점수 애매(0.2~0.45), 차선 의심(밝고 채도 낮고 굵음), 그림자 의심(주변보다 어두움),
+  방향 이탈, 짧은 조각 → 하나라도 해당하면 VLM으로. 선별 이유는 프롬프트·보고서에 그대로 사용.
+- 주의: 위에서 내려다본 전선도 지면보다 어두운 경우가 많아 그림자 규칙은 진짜 전선도 많이 보냄.
 
 ### Stage 4. VLM 판정 (`vlm/`)
-- 입력: marking 이미지 + 해당 후보 crop + 기하 특징 텍스트.
+- 입력: marking 이미지 2장 + 선별 이유 + 기하 특징 텍스트.
 - 출력은 **JSON 스키마로 강제**:
   ```json
-  {
-    "cand_id": 3,
-    "is_power_line": false,
-    "confusor_type": "lane_marking | shadow | road_edge | guardrail | crack | building_edge | branch | other | none",
-    "confidence": 0.82,
-    "evidence": ["지면 위 흰색 도색", "도로 방향과 평행", "끝점이 도로 경계에서 끊김"]
-  }
+  {"cand_id": 3, "is_power_line": false, "confusor_type": "lane_marking",
+   "confidence": 0.82, "evidence": ["지면 위 흰색 도색", "도로 방향과 평행"]}
   ```
-- 프롬프트에 의미적 판단 기준을 명시: 전선은 공중에 떠 있어 **그림자와 쌍으로 나타남**, 전주/철탑과 연결, 완만한 처짐(catenary), 도로 구조와 무관한 방향 등.
-- 백엔드 교체 가능하도록 인터페이스화: 로컬(Qwen2.5-VL, InternVL 등) / API.
+- 프롬프트의 의미적 판단 기준: 전선은 공중(전주·애자 연결, 평행 다발, 도로 구조와 무관),
+  그림자는 지면 위 평행·어긋난 어두운 선, 차선은 노면 도색(흰/노랑, 도로 방향, 경계에서 끊김).
+- 백엔드: `claude` (API) / `qwen` (로컬 GPU) / `mock` (흐름 점검용 규칙, 수치 무의미).
 
-### Stage 5. 결정 융합 (`fusion/`)
-- 최종 판정 = f(검출 점수, VLM 판정, VLM confidence). 규칙 기반부터 시작 (예: VLM이 높은 확신으로 부정하면 제거).
-- 비교 실험을 위해 융합 전/후 결과를 모두 저장.
+### Stage 5. 결정 융합 (`fusion/fuse.py`)
+| 상황 | 결과 |
+|---|---|
+| VLM 안 거침 | 점수 ≥ keep_score(0.3)이면 유지 |
+| VLM "전선 아님", 확신도 ≥ 0.6 | 제거 |
+| VLM "전선", 확신도 ≥ 0.6 | 유지 (점수가 낮아도) |
+| VLM 확신도 낮음 | 점수 기준 |
 
 ### Stage 6. 평가 (`eval/`)
-- 비교군:
+- 비교군 (모두 같은 LangSAM 후보에서 계산 → VLM 효과만 분리됨):
   | 구분 | 설명 |
   |---|---|
-  | B1 | Baseline OD 모델 (예: YOLO, 데이터로 학습) |
-  | B2 | LangSAM 단독 (zero-shot) |
-  | P1 | LangSAM + VLM (제안 파이프라인) |
-  | P2 | Baseline OD + VLM (VLM 효과만 분리 확인용, 선택) |
-- 지표: 전선은 몇 px 굵기라 IoU가 의미 없으므로 **선 기반 허용오차 지표** 사용
-  - Precision = 예측 골격 픽셀 중 정답 선에서 tol(10px) 이내 비율 / Recall = 정답 선 픽셀 중 예측에서 tol 이내 비율
-  - 후보 단위 TP/FP = 후보 골격의 50% 이상이 정답 근처면 TP → VLM이 지운 후보가 오검출이었는지 판정
-- **오류 유형 분석**: FP를 혼동 유형(차선/그림자/…)별로 집계 → "VLM이 어떤 유형의 오답을 줄였는가"가 핵심 결과.
-- 이미지별로 정답 여부(맞춤/오검출/미검출)를 기록.
+  | LangSAM 전체 후보 | 낮은 임계값으로 뽑은 후보 전부 (recall 상한 참고) |
+  | **LangSAM 단독 (기준)** | 점수 ≥ 0.3인 후보를 전선으로 봄 = 단순 OD의 일반적 사용 |
+  | **LangSAM + VLM (제안)** | 최종 판정 |
+- 지표: 전선은 몇 px 굵기라 IoU 대신 **선 기반 허용오차(10px)** Precision / Recall / F1.
+- 후보 단위 TP/FP → VLM 효과 분류: 오검출 제거 / 전선 회복 / 전선 오제거 / 오검출 추가.
+- **혼동 유형별 오검출 제거 수**가 핵심 결과.
 
 ### Stage 7. 보고서 생성 (`report/`)
-- **역할 분리**: LLM은 *내용(텍스트)* 만 생성, *서식*은 python-docx 템플릿이 고정 → 공식 양식과 1페이지 분량을 코드로 보장.
-- LLM 입력: 평가 지표 JSON + 대표 사례(VLM 근거 포함) 몇 건.
-- LLM 출력: 필드별 글자 수 제한이 있는 JSON → 템플릿에 채움.
-- 1페이지 보고서 양식(안):
-  1. 머리말: 문서 제목, 문서번호, 작성일, 작성자/검토자, (결재란)
-  2. **개요**: 목적, 대상 데이터 (2~3줄)
-  3. **파이프라인 동작 요약**: 단계 흐름 1줄 도식 + 설명
-  4. **성능 비교표**: B1 / B2 / P1 의 P·R·F1, 오류 유형별 FP 감소
-  5. **VLM 주요 판단 사례**: 썸네일 1~2개 + 판단 근거 (예: "#3은 지면 도색 및 도로와 평행하여 차선으로 판단, 제외")
-  6. **결론 및 조치 사항**: 개선 효과, 한계, 담당자 확인 필요 항목
+- **역할 분리**: 숫자·서식은 코드가 고정, LLM은 문장만 (글자 수 상한) → 수치 왜곡 방지, 1페이지 보장.
+- 구성: 문서정보·결재란 / 1. 개요 / 2. 파이프라인 동작 / 3. 성능 비교 / 4. VLM 판단 사례 / 5. 결론 및 조치.
 
 ---
 
-## 3. 디렉토리 구조 (예정)
+## 3. 디렉토리 구조
 
 ```
 26-capstone/
-├── dataset/                 # 원본 데이터 (폴더별 드론 이미지 + .xml 정답)
-├── configs/
-│   └── default.yaml         # 모든 임계값·경로·프롬프트·백엔드 설정         # 경로, threshold, 프롬프트, VLM 백엔드 등 모든 설정
+├── dataset/                 # 폴더별 드론 이미지 + CVAT XML 정답
+├── configs/default.yaml     # 모든 임계값·경로·프롬프트·백엔드 설정
 ├── src/powerline/
-│   ├── data/                # XML 파서, 데이터셋, split
-│   ├── detectors/           # baseline(YOLO), langsam 래퍼
+│   ├── data/                # XML 파서, 데이터셋 로딩
+│   ├── detectors/           # LangSAM 래퍼, 타일링, 후보 특징
 │   ├── marking/             # Set-of-Mark 오버레이, crop
-│   ├── vlm/                 # 백엔드 인터페이스, 프롬프트, 출력 스키마
-│   ├── fusion/              # 불확실 후보 라우팅, 결정 융합
-│   ├── eval/                # 매칭, 지표, 오류 유형 분석
-│   ├── report/              # LLM 작성기, docx 렌더러, 템플릿
-│   └── types.py             # Candidate / Verdict / Result 데이터 클래스
+│   ├── fusion/              # 불확실 후보 선별, 결정 융합
+│   ├── vlm/                 # 백엔드(claude/qwen/mock), 프롬프트, 출력 스키마
+│   ├── eval/                # 선 기반 지표, VLM 효과 분석
+│   ├── report/              # 보고서 문장 작성, docx 렌더러
+│   ├── pipeline.py          # Stage 1~5 실행·저장
+│   └── types.py             # Candidate / Verdict / FinalDecision
 ├── scripts/
-│   ├── train_baseline.py
+│   ├── inspect_data.py      # 데이터 현황 + 정답 시각화
 │   ├── run_pipeline.py      # Stage 1~5
 │   ├── evaluate.py          # Stage 6
 │   └── make_report.py       # Stage 7
-├── outputs/                 # 실행 결과 (git 제외)
-│   └── <run_id>/{candidates,marked,verdicts,metrics,report}.*
-└── docs/ARCHITECTURE.md
+└── outputs/<run>/           # candidates/ decisions/ marked/ metrics.json report.docx (git 제외)
 ```
 
-### 공통 데이터 타입 (`types.py`)
-- `Candidate`: image_id, cand_id, source(`yolo`/`langsam`), bbox, mask(RLE), det_score, geom_features
-- `Verdict`: cand_id, is_power_line, confusor_type, confidence, evidence
-- `FinalDetection`: Candidate + Verdict + final_label + gt_match(TP/FP) 
-
----
-
-## 4. 구현 순서
-
-1. 데이터 로더 + XML 파서 + 정답 시각화 (데이터 포맷 확정)
-2. 평가 모듈 (먼저 만들어 두면 모든 모델을 같은 기준으로 비교 가능)
-3. Baseline OD 학습/추론 → **B1 성능 + 오류 사례 수집** (어떤 혼동이 실제로 많은지 확인)
-4. LangSAM 후보 생성 + Marking
-5. VLM 판정 + 융합 → P1 성능
-6. 보고서 생성기
-
-## 5. 결정이 필요한 사항
-- [x] XML 정답 포맷 → CVAT polyline 확정
-- [ ] 실행 환경 GPU 사양 (로컬 VLM 사용 가능 여부)
-- [ ] VLM 백엔드: 로컬 오픈소스 vs API
-- [ ] Baseline OD 모델 종류
-- [ ] 보고서 머리말 항목 (기관/양식 규정이 있으면 반영)
+## 4. 남은 결정 / 조정 사항
+- [x] XML 정답 포맷 → CVAT polyline
+- [x] 학습 없음 → 사전학습 모델 조합만
+- [ ] 선별 규칙 임계값 (특히 그림자 규칙) — 실데이터 결과 보고 조정
+- [ ] VLM 백엔드: Claude API vs 로컬 Qwen 결과 비교
+- [ ] 보고서 머리말 항목 (기관 양식 규정이 있으면 반영)
