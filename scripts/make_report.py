@@ -10,7 +10,7 @@ from powerline.vlm import build_vlm
 def main():
     p = base_parser(__doc__)
     p.add_argument("--run", required=True)
-    p.add_argument("--llm", default=None, help="claude | qwen | none (기본: 설정 파일)")
+    p.add_argument("--llm", default=None, help="qwen | claude | none (기본: 설정 파일 = qwen)")
     args = p.parse_args()
     cfg = load_config(args.config)
     run_dir = ROOT / cfg["output"]["root"] / args.run

@@ -18,7 +18,7 @@ from powerline.vlm import build_vlm
 def main():
     p = base_parser(__doc__)
     p.add_argument("--detector", default="langsam", choices=["langsam"])
-    p.add_argument("--vlm", default=None, help="claude | qwen | mock (기본: 설정 파일)")
+    p.add_argument("--vlm", default=None, help="qwen | claude | mock (기본: 설정 파일 = qwen)")
     p.add_argument("--no-vlm", action="store_true")
     p.add_argument("--run", required=True, help="outputs/<run> 이름")
     p.add_argument("--reuse", default=None, help="다른 run의 후보(candidates) 재사용")
@@ -28,6 +28,12 @@ def main():
     detector = None
     if args.reuse:
         src = ROOT / cfg["output"]["root"] / args.reuse / "candidates"
+        if not src.is_dir():
+            raise SystemExit(
+                f"재사용할 후보가 없습니다: {src}\n"
+                f"먼저 LangSAM 후보를 추출하세요:\n"
+                f"  python scripts/run_pipeline.py --no-vlm --run {args.reuse}"
+                + (f" --limit {args.limit}" if args.limit else ""))
         shutil.copytree(src, run_dir / "candidates", dirs_exist_ok=True)
     else:
         detector = build_detector(args.detector, cfg)
