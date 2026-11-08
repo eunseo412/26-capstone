@@ -3,8 +3,8 @@
 
 data:
   root: dataset
-  frames: [frame_1, frame_2, frame_3, frame_4]
-  image_dir: images            # dataset/<frame>/images/
+  frames: auto                 # XML이 있는 dataset 하위 폴더 전부 (또는 [frame_1, frame_2] 처럼 지정)
+  image_dir: images            # 우선 찾는 이미지 폴더. 없으면 하위 폴더 전체에서 파일명으로 찾음
   annotation_glob: "*.xml"     # dataset/<frame>/*.xml (CVAT for images 1.1)
   # XML에 'powerline'과 'polyline' 두 라벨이 섞여 있음 → 둘 다 전선으로 취급
   positive_labels: [powerline, polyline]

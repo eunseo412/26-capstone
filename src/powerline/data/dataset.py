@@ -52,19 +52,44 @@ def rasterize_polylines(ann: ImageAnnotation, thickness: int) -> np.ndarray:
     return mask.astype(bool)
 
 
+def _frame_dirs(root: Path, frames) -> list[Path]:
+    """frames가 "auto"면 XML이 들어 있는 dataset 하위 폴더를 모두 사용."""
+    if frames == "auto" or not frames:
+        return sorted(d for d in root.iterdir() if d.is_dir() and any(d.glob("*.xml")))
+    return [root / f for f in frames]
+
+
+def _image_index(fdir: Path, image_dir: str) -> dict[str, Path]:
+    """파일명 → 경로. 지정한 image_dir를 우선 보고, 없으면 하위 폴더 전체에서 찾는다
+    (예: frame_4_mini/images_mini/)."""
+    index: dict[str, Path] = {}
+    exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+    preferred = fdir / image_dir
+    for d in [preferred] + sorted(p for p in fdir.rglob("*") if p.is_dir() and p != preferred):
+        if not d.is_dir():
+            continue
+        for f in d.iterdir():
+            if f.suffix.lower() in exts:
+                index.setdefault(f.name, f)
+    return index
+
+
 def load_dataset(cfg: dict, root_dir: str | Path = ".") -> list[ImageRecord]:
     dcfg = cfg["data"]
     root = Path(root_dir) / dcfg["root"]
     records: list[ImageRecord] = []
-    for frame in dcfg["frames"]:
-        fdir = root / frame
+    for fdir in _frame_dirs(root, dcfg.get("frames")):
+        frame = fdir.name
         xmls = sorted(fdir.glob(dcfg.get("annotation_glob", "*.xml")))
         if not xmls:
             log.warning("정답 XML 없음: %s", fdir)
             continue
+        index = _image_index(fdir, dcfg.get("image_dir", "images"))
         for xml_path in xmls:
             for ann in parse_cvat_xml(xml_path, dcfg.get("positive_labels")):
-                path = fdir / dcfg.get("image_dir", "images") / ann.name
+                # XML의 name에 경로가 붙어 있는 경우가 있음 (예: "mini_data_003/images/X.jpg") → 파일명만 사용
+                ann.name = Path(ann.name).name
+                path = index.get(ann.name, fdir / dcfg.get("image_dir", "images") / ann.name)
                 records.append(ImageRecord(f"{frame}/{ann.name}", frame, path, ann))
     missing = sum(not r.exists for r in records)
     if missing:
