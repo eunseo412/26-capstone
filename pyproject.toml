@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powerline"
+version = "0.1.0"
+description = "Drone power-line detection with LangSAM + VLM verification"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "opencv-python-headless",
+  "scikit-image",
+  "pillow",
+  "pyyaml",
+  "python-docx",
+  "pypdf",
+]
+
+[project.optional-dependencies]
+claude = ["anthropic"]
+qwen = ["torch", "transformers>=4.49", "accelerate", "qwen-vl-utils"]
+yolo = ["ultralytics"]
+# LangSAM: pip install git+https://github.com/luca-medeiros/lang-segment-anything.git
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

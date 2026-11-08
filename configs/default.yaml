@@ -1,0 +1,88 @@
+# 전선 검출 파이프라인 기본 설정
+# 경로는 저장소 루트 기준 상대경로
+
+data:
+  root: dataset
+  frames: [frame_1, frame_2, frame_3, frame_4]
+  image_dir: images            # dataset/<frame>/images/
+  annotation_glob: "*.xml"     # dataset/<frame>/*.xml (CVAT for images 1.1)
+  # XML에 'powerline'과 'polyline' 두 라벨이 섞여 있음 → 둘 다 전선으로 취급
+  positive_labels: [powerline, polyline]
+  # 같은 영상의 다른 프레임이 train/test에 섞이지 않도록 영상 ID 단위로 split
+  split:
+    seed: 42
+    val_ratio: 0.15
+    test_ratio: 0.2
+
+gt:
+  line_thickness: 6            # 정답 polyline을 마스크로 그릴 때 두께(px, 원본 4K 기준)
+
+eval:
+  tolerance_px: 10             # 예측 선이 정답 선에서 이 거리 이내면 맞은 것으로 봄
+  instance_match_ratio: 0.5    # 후보 골격의 이 비율 이상이 정답 근처면 TP 후보
+
+detectors:
+  langsam:
+    text_prompts: ["power line", "electric wire", "cable"]
+    box_threshold: 0.2          # recall 우선: 낮게
+    text_threshold: 0.2
+    tile:
+      enabled: true
+      size: 1280
+      overlap: 0.2
+    min_area_px: 200
+  yolo:
+    weights: runs/baseline/weights/best.pt
+    conf: 0.25
+    imgsz: 1280
+    tile:
+      enabled: true
+      size: 1280
+      overlap: 0.2
+
+router:
+  # 이 구간의 검출 점수는 '불확실'로 보고 VLM에 보냄
+  score_low: 0.2
+  score_high: 0.6
+  # 아래 규칙 중 하나라도 걸리면 점수와 무관하게 VLM에 보냄
+  suspect_rules:
+    lane_marking: true          # 밝고 채도 낮은(흰/노랑) 직선
+    # 주의: 위에서 내려다본 전선도 지면보다 어둡게 보이는 경우가 많아 이 규칙은 진짜 전선도 많이 보냄
+    #       → VLM 호출 수가 늘어남. 실데이터로 비용/효과를 보고 조정할 것
+    shadow: true                # 주변보다 어두운 선
+    orientation_outlier: true   # 다른 전선 후보들과 방향이 크게 다름
+    short_segment: true         # 짧은 조각
+
+marking:
+  crop_context: 1.6             # 후보 bbox 대비 crop 확대 배율
+  crop_max_side: 768
+  overview_max_side: 1568
+
+vlm:
+  backend: claude               # claude | qwen | mock
+  claude:
+    model: claude-opus-5-5
+    effort: medium
+    max_tokens: 16000
+    fallbacks: true             # 안전 분류기 거절 시 서버측 대체 모델로 재시도
+  qwen:
+    model: Qwen/Qwen2.5-VL-7B-Instruct
+    device: cuda
+    max_new_tokens: 1024
+
+fusion:
+  reject_confidence: 0.6        # VLM이 이 확신도 이상으로 '전선 아님'이면 제거
+  accept_confidence: 0.6        # VLM이 이 확신도 이상으로 '전선'이면 유지(점수 낮아도)
+  keep_score: 0.6               # VLM을 거치지 않은 후보는 이 점수 이상이면 유지
+
+report:
+  llm_backend: claude           # claude | none (none이면 템플릿 문장으로 작성)
+  title: "드론 영상 전선 검출 결과 보고서"
+  organization: "26 캡스톤"
+  author: ""
+  reviewer: ""
+  doc_number_prefix: "PL"
+  max_cases: 2
+
+output:
+  root: outputs

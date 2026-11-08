@@ -31,9 +31,10 @@ flowchart LR
 
 ### Stage 0. 데이터 로딩 (`data/`)
 - `dataset/<폴더>/` 의 이미지와 같은 이름의 `.xml` 정답 파일을 매칭.
-- XML 파서는 포맷에 맞춰 구현 (Pascal VOC bbox / CVAT polyline·polygon 여부는 데이터 확인 후 확정).
-- 전선은 가늘고 길기 때문에 **bbox 정답이라도 내부적으로는 선분/마스크 형태로 변환**해 평가에 쓸 수 있게 한다.
-- 촬영 폴더(=비행/장소) 단위로 train/val/test split → 같은 장면이 train/test에 섞이지 않도록.
+- 정답 포맷: **CVAT for images 1.1, polyline** (frame_1: 이미지 66장, 3840×2160, polyline 1,633개).
+  라벨이 `powerline`(1,152)과 `polyline`(481) 두 가지로 섞여 있어 둘 다 전선으로 취급 (`data.positive_labels`).
+- 파일명이 `<영상ID>_frame_000000.jpg` 형식 → frame_1~4가 같은 영상의 다른 시점일 가능성이 높으므로
+  **영상 ID 단위로 train/val/test split** (같은 장면이 train/test에 섞여 성능이 부풀려지는 것 방지).
 
 ### Stage 1. 후보 생성 — LangSAM (`detectors/langsam.py`)
 - LangSAM = GroundingDINO(텍스트 → box) + SAM(box → mask).
@@ -78,7 +79,9 @@ flowchart LR
   | B2 | LangSAM 단독 (zero-shot) |
   | P1 | LangSAM + VLM (제안 파이프라인) |
   | P2 | Baseline OD + VLM (VLM 효과만 분리 확인용, 선택) |
-- 지표: Precision / Recall / F1 (IoU 기준), 전선 특성상 **선 기반 허용오차 매칭(buffer IoU)** 병행.
+- 지표: 전선은 몇 px 굵기라 IoU가 의미 없으므로 **선 기반 허용오차 지표** 사용
+  - Precision = 예측 골격 픽셀 중 정답 선에서 tol(10px) 이내 비율 / Recall = 정답 선 픽셀 중 예측에서 tol 이내 비율
+  - 후보 단위 TP/FP = 후보 골격의 50% 이상이 정답 근처면 TP → VLM이 지운 후보가 오검출이었는지 판정
 - **오류 유형 분석**: FP를 혼동 유형(차선/그림자/…)별로 집계 → "VLM이 어떤 유형의 오답을 줄였는가"가 핵심 결과.
 - 이미지별로 정답 여부(맞춤/오검출/미검출)를 기록.
 
@@ -102,7 +105,7 @@ flowchart LR
 26-capstone/
 ├── dataset/                 # 원본 데이터 (폴더별 드론 이미지 + .xml 정답)
 ├── configs/
-│   └── default.yaml         # 경로, threshold, 프롬프트, VLM 백엔드 등 모든 설정
+│   └── default.yaml         # 모든 임계값·경로·프롬프트·백엔드 설정         # 경로, threshold, 프롬프트, VLM 백엔드 등 모든 설정
 ├── src/powerline/
 │   ├── data/                # XML 파서, 데이터셋, split
 │   ├── detectors/           # baseline(YOLO), langsam 래퍼
@@ -139,7 +142,7 @@ flowchart LR
 6. 보고서 생성기
 
 ## 5. 결정이 필요한 사항
-- [ ] XML 정답 포맷 (bbox / polyline / polygon) — 데이터 확인 후 확정
+- [x] XML 정답 포맷 → CVAT polyline 확정
 - [ ] 실행 환경 GPU 사양 (로컬 VLM 사용 가능 여부)
 - [ ] VLM 백엔드: 로컬 오픈소스 vs API
 - [ ] Baseline OD 모델 종류

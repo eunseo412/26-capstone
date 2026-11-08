@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 *.pt
 *.pth
+runs/
+*.egg-info/
+.pytest_cache/
