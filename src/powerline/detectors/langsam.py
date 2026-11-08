@@ -16,7 +16,13 @@ class LangSAMDetector(Detector):
     name = "langsam"
 
     def __init__(self, cfg: dict):
-        from lang_sam import LangSAM  # 무거운 의존성은 사용할 때만 import
+        try:
+            from lang_sam import LangSAM  # 무거운 의존성은 사용할 때만 import
+        except ImportError as e:
+            raise SystemExit(
+                "LangSAM(lang_sam)이 설치되어 있지 않습니다. 아래로 설치하세요:\n"
+                "  pip install git+https://github.com/luca-medeiros/lang-segment-anything.git\n"
+                f"(원래 오류: {e})")
 
         self.cfg = cfg
         self.model = LangSAM()
